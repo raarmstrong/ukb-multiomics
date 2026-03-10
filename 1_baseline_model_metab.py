@@ -1,0 +1,233 @@
+# import libraries
+import numpy as np
+import pandas as pd
+import sys
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Force CPU use
+
+from datetime import datetime
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, RobustScaler, FunctionTransformer
+from sklearn.pipeline import Pipeline, make_pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.model_selection import StratifiedKFold, RepeatedStratifiedKFold
+from imblearn.ensemble import BalancedBaggingClassifier
+
+from sklearn.model_selection import cross_validate
+from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
+
+
+from sklearn.metrics import make_scorer, recall_score, precision_score, f1_score, accuracy_score, balanced_accuracy_score, average_precision_score, roc_auc_score, precision_recall_curve
+
+from Classifiers import get_classifier_and_cv
+
+import warnings
+from sklearn.exceptions import ConvergenceWarning
+# Suppress only ConvergenceWarning
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
+
+import argparse
+import yaml
+from sklearn.base import BaseEstimator, TransformerMixin
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default='config.yaml', help="Path to config.yaml")
+    config_arg = parser.parse_args()
+
+    config_path = config_arg.config
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file {config_path} not found.")
+    # Load the config file
+    with open(config_path, 'r') as file:
+        config = yaml.safe_load(file)
+
+else:
+# if running interactive
+    with open('config.yaml', 'r') as file:
+        config = yaml.safe_load(file)
+
+DATA_DIR = config['datadir']
+RESULTS_DIR = config['resultsdir']
+MODEL_DIR = config['modeldir']
+
+args = []
+args.insert(0, 'metab')
+
+datadir = DATA_DIR
+  
+data_cc = pd.read_csv(f'{datadir}/all_cc_me_cp.csv.gz')
+data_metab = pd.read_csv(f'{datadir}/metabolomics_all_clean.csv.gz')
+metab_info = pd.read_csv(f'{datadir}/metabolomics_info_clean.csv.gz')
+data_metab = pd.merge(data_metab, metab_info[['eid', 'spectrometer']], on='eid')
+del(metab_info)
+
+# merge everything
+data_all = pd.merge(data_cc, data_metab, how = 'left', on = 'eid')
+data_all.shape
+
+# define datasets - base demographics, clinical, bloods, pgs, metabolomic, gneotype
+
+#columns_base = ['case', 'age_surgery', 'score', 'tretspef_uni', 'admimeth_uni', 'opcat']
+# filter to admimeth elective or emergency
+data_all = data_all[data_all['admimeth_uni'].isin(['elective', 'emergency'])]
+
+# converting opcat to binary
+data_all['opcat'] = data_all['opcat'].apply(lambda x: 'complex' if x.endswith('com') else '0')
+
+columns_base = ['case', 'age_surgery', 'sex', 'score', 'admimeth_uni', 'opcat']
+columns_metab = [col for col in data_metab.columns if col not in ['eid']]
+
+
+
+data_all = data_all[data_all['eid'].isin(data_metab['eid'])]
+data_all.shape
+data_all = data_all.drop('eid', axis=1) 
+
+# complication loop
+
+for cn in ['af', 'aki', 'ami', 'delirium', 'stroke', 'ssi']:
+    
+    age = 60 if cn in ['delirium', 'stroke'] else 18
+
+    start_comp = datetime.now()
+    print('Starting', cn, ' ', args[0], ' at ', start_comp)
+
+    # set complication
+    data = data_all[data_all['comp'] == cn]
+
+    if cn == 'ami':
+        print('Dropping cardiac for ami')
+        print(f'Before: {data.shape[0]}')
+        data = data[~data['tretspef_uni'].isin(["Cardiology", "Cardiac surgery", "Cardiothoracic surgery"])]
+        print(f'After: {data.shape[0]}')
+
+    data = data.drop('comp', axis=1)
+
+    # set age
+    data = data[data['age_surgery'] >= age]
+
+    data_now = data[columns_base + columns_metab]
+
+    # remove individuals with >=80% missing values
+    data_now = data_now.dropna(thresh=0.8*data_now.shape[1], axis=0)
+
+    # drop >10% missing values
+    predrop = data_now.columns
+
+    data_now = data_now.dropna(thresh=0.9*len(data_now), axis=1)
+    postdrop = data_now.columns
+    print('Columns dropped:', [col for col in predrop if col not in postdrop])
+    print('Number of columns dropped:', len([col for col in predrop if col not in postdrop]))
+
+    #X = data_now.drop(['case'], axis=1)
+    X = data_now[columns_base].drop(['case'], axis=1)
+    y = data_now['case']
+
+    print('Cases and controls:', y.value_counts())
+
+    # preprocessing
+
+    columns_to_exclude = ['count_all', 'count_ins', 'mi', 'chf', 'pvd', 'cevd', 'dementia', 'cpd', 'rheumd', 'pud', 'mld', 'diab', 'diabwc', 'hp', 'rend', 'canc', 'msld', 'metacanc', 'aids', 'score', 'spectrometer'] 
+    columns_to_scale = [col for col in X.columns if X[col].dtype in ['int64', 'float64'] and col not in columns_to_exclude and col not in columns_metab]
+    columns_to_encode = [col for col in X.columns if X[col].dtype in ['object'] and col not in columns_to_exclude and col not in columns_metab]
+    columns_to_zero = ['score']
+    
+    print('Columns to scale:', columns_to_scale)
+    print('Columns to encode:', columns_to_encode)
+
+
+    num_pipeline = Pipeline([
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler())
+        ])
+    # categorical columns
+    cat_pipeline = Pipeline([
+        ('imputer', SimpleImputer(strategy='constant')),
+        ('encoder', OneHotEncoder(handle_unknown='error', drop='if_binary'))])
+    # columns to zero
+    def binarize_cci(X):
+        return (X >= 2).astype(int)
+
+    zero_pipeline = Pipeline([
+        ('imputer', SimpleImputer(strategy='constant', fill_value=0)),
+        ('binarizer', FunctionTransformer(binarize_cci, validate=False)),
+        ])
+    data_pipeline_ae = ColumnTransformer([
+        ('num', num_pipeline, columns_to_scale),
+        ('cat', cat_pipeline, columns_to_encode),
+        ('zero', zero_pipeline, columns_to_zero)],
+        n_jobs=1,
+        remainder='drop'
+        )
+
+    n_cases = y.sum()
+    
+    base_lr, model, cv_strategy = get_classifier_and_cv(n_cases)
+    
+    args.insert(1, 'bagbal') 
+    models = []
+    models.append((
+        args[1],
+        model
+        ))
+
+    for name, model in models:
+
+        imba_pipeline = make_pipeline(data_pipeline_ae, model)
+        
+        start_mod = datetime.now()
+        print('Starting fit ', name, ' for ', cn, ' at ', start_mod)
+        
+        scores = {'recall': 'recall',
+                    'balanced_accuracy': 'balanced_accuracy',
+                    'roc_auc': 'roc_auc',
+                    'precision': 'precision',
+                    'f1': 'f1',
+                    'recall_macro': 'recall_macro',
+                    'precision_macro': 'precision_macro',
+                    'f1_macro': 'f1_macro',
+                    'average_precision': 'average_precision'}
+        
+        nested = cross_validate(
+            imba_pipeline, 
+            X = X, 
+            y = y, 
+            cv=cv_strategy, 
+            return_train_score=True,
+            scoring=scores,
+            return_estimator=True, 
+            n_jobs=60, 
+            verbose=3)
+        
+        end_mod = datetime.now()
+        print('Finished ', name, 'for ', cn, ' at ', end_mod, '. Time elapsed: ', end_mod - start_mod)
+        print('Results for ', name, 'for ', cn, ' in dataset ', args[0])
+        
+        results_df = pd.DataFrame(nested).drop(['fit_time', 'score_time', 'estimator'], axis=1)
+        results_df.loc['mean'] = results_df.mean()
+        results_df.loc['std'] = results_df.std()
+        results_df['model'] = name
+        results_df['cn'] = cn
+        results_df['dataset'] = args[0]
+        results_df['date'] = datetime.now().strftime("%Y%m%d-%H%M%S")
+        results_df['age'] = age
+        results_df['n_cases'] = y.sum()
+        results_df['n_controls'] = len(y) - y.sum()
+
+        print(results_df[['test_recall', 'test_balanced_accuracy', 'test_roc_auc']])
+
+        # make a results folder for current date
+        current_date_dir = datetime.now().strftime("%Y%m%d")
+        full_output_dir = os.path.join(RESULTS_DIR, current_date_dir)
+        os.makedirs(full_output_dir, exist_ok=True)
+
+        results_filename = f'results_{cn}_{name}_{args[0]}_{age}_baseline_en_newstrategy.csv'
+        results_file_path = os.path.join(full_output_dir, results_filename)
+        
+        results_df.to_csv(results_file_path, index=True)
+        
+        end_comp = datetime.now()
+        print(f'Finished {cn} {age} in {end_comp - start_comp}')
+
+print('Done')
