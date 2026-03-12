@@ -100,4 +100,4 @@ modeldir: /path/to/models
 
 If you use this code, please cite the accompanying preprint:
 
-> [TBC]
+> https://doi.org/10.64898/2026.03.10.26348039
