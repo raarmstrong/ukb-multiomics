@@ -1,5 +1,7 @@
 # UK Biobank Multiomics Prediction Pipelines
 
+[![DOI](https://zenodo.org/badge/1178011987.svg)](https://doi.org/10.5281/zenodo.18979068)
+
 This repository contains code and pipelines for machine learning prediction of postoperative complications using multiomics data from the UK Biobank. The code accompanies the following publication: Armstrong et al
 
 ## Overview
