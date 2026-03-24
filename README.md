@@ -2,7 +2,7 @@
 
 [![DOI](https://zenodo.org/badge/1178011987.svg)](https://doi.org/10.5281/zenodo.18979068)
 
-This repository contains code and pipelines for machine learning prediction of postoperative complications using multiomics data from the UK Biobank. The code accompanies the following publication: Armstrong et al
+This repository contains code and pipelines for machine learning prediction of postoperative complications using multiomics data from the UK Biobank. The code accompanies the following preprint: Using multiomic data to predict postoperative complications after major surgery in the UK Biobank cohort. medRxiv 2026.03.10.26348039; doi: https://doi.org/10.64898/2026.03.10.26348039.
 
 ## Overview
 
