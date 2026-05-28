@@ -14,7 +14,6 @@ from sklearn.impute import SimpleImputer
 from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedKFold
 from imblearn.ensemble import BalancedBaggingClassifier
 
-#from imblearn.pipeline import make_pipeline, Pipeline
 from sklearn.model_selection import GridSearchCV, cross_validate, RandomizedSearchCV
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier
 from sklearn.linear_model import LogisticRegression, LogisticRegressionCV

@@ -13,7 +13,6 @@ from sklearn.impute import SimpleImputer
 from sklearn.model_selection import StratifiedKFold, RepeatedStratifiedKFold
 from imblearn.ensemble import BalancedBaggingClassifier
 
-#from imblearn.pipeline import make_pipeline, Pipeline
 from sklearn.model_selection import cross_validate
 from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
 

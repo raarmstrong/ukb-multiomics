@@ -15,7 +15,6 @@ from sklearn.impute import SimpleImputer
 from sklearn.model_selection import StratifiedKFold, RepeatedStratifiedKFold
 from imblearn.ensemble import BalancedBaggingClassifier
 
-#from imblearn.pipeline import make_pipeline, Pipeline
 from sklearn.model_selection import GridSearchCV, cross_validate, RandomizedSearchCV
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier
 from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
@@ -192,10 +191,8 @@ for dataset in ['metab', 'multi_infl_1', 'multi_infl_1+2', 'multi_prot_all', 'pr
             print(results_df[['test_roc_auc', 'test_recall', 'test_balanced_accuracy']])
 
             # make a results folder for current date
-            #current_date_dir = datetime.now().strftime("%Y%m%d")
             full_output_dir = os.path.join(RESULTS_DIR, 'transfer')
             os.makedirs(full_output_dir, exist_ok=True)
-
             results_filename = f'results_{cn}_{name}_{dataset}_ae_withriskscore_newcontrols_newprepro.csv'
             results_file_path = os.path.join(full_output_dir, results_filename)
             

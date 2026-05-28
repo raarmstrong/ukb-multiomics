@@ -19,7 +19,6 @@ from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.model_selection import StratifiedKFold
 
-#from imblearn.pipeline import make_pipeline, Pipeline
 from sklearn.model_selection import GridSearchCV, cross_validate, RandomizedSearchCV
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier
 from sklearn.linear_model import LogisticRegression
@@ -244,8 +243,6 @@ for cn in comp_loop:
 
             if config_arg.config_fitfinal.lower() == 'no':
 
-                grid_imba = GridSearchCV(imba_pipeline, param_grid=params, cv=inner_cv, scoring='roc_auc', return_train_score=True, n_jobs=16, verbose=3)
-
                 start_mod = datetime.now()
                 print('Starting fit ', name, ' for ', cn, ' at ', start_mod)
                 
@@ -273,14 +270,6 @@ for cn in comp_loop:
                 print('Finished ', name, 'for ', cn, ' at ', end_mod, '. Time elapsed: ', end_mod - start_mod)
                 print('Results for ', name, 'for ', cn, ' in dataset ', args[0])
 
-                #for n in nested['estimator']:
-                #    print(f'{n.best_score_}, {n.best_params_}')
-
-                #besties = [n.best_params_ for n in nested['estimator']]
-                #besties_df = pd.DataFrame(besties)
-
-                #results_df = pd.DataFrame(nested).drop(['fit_time', 'score_time', 'estimator'], axis=1)
-                
                 results_df = pd.DataFrame(nested).drop(['fit_time', 'score_time'], axis=1)
                 results_df.loc['mean'] = results_df.mean()
                 results_df.loc['std'] = results_df.std()
@@ -314,18 +303,8 @@ for cn in comp_loop:
                     else:
                         results_filename = f'results_{cn}_{name}_{args[0]}_{dataset}_noae_nonsurg_newcontrols_newprepro.csv'
                 results_file_path = os.path.join(full_output_dir, results_filename)
-                #besties_filename = f'best_params_{cn}_{name}_{args[0]}_ae_{dim_trial}_{dropout_trial}_{age}_final.csv'
-                #besties_file_path = os.path.join(full_output_dir, besties_filename)
                 
                 results_df.to_csv(results_file_path, index=True)
-                #besties_df.to_csv(besties_file_path, index=True)
-                
-                #model_output_dir = os.path.join(MODEL_DIR, current_date_dir)
-                #os.makedirs(model_output_dir, exist_ok=True)
-
-                #model_filename = f'model_{cn}_{name}_{args[0]}_ae_{dim_trial}_{dropout_trial}_{age}_newpipeline_newestbaseline.joblib'
-                #model_file_path = os.path.join(model_output_dir, model_filename)
-                #dump(nested, model_file_path)
 
             else:
 
