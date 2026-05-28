@@ -1,11 +1,11 @@
 # import libraries
 import numpy as np
 import pandas as pd
-import sys
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Force CPU use
 
 from datetime import datetime
+# moving other packages up here as they are being imported multiple times
 from sklearn.preprocessing import StandardScaler, OneHotEncoder, RobustScaler, FunctionTransformer
 from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.compose import ColumnTransformer
@@ -13,13 +13,21 @@ from sklearn.impute import SimpleImputer
 from sklearn.model_selection import StratifiedKFold, RepeatedStratifiedKFold
 from imblearn.ensemble import BalancedBaggingClassifier
 
-from sklearn.model_selection import cross_validate
+from sklearn.model_selection import GridSearchCV, cross_validate
 from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
 
+# for autoencoder
+from sklearn.base import BaseEstimator, TransformerMixin
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Dense, Dropout
+from tensorflow.keras.optimizers import Adam
+
+from Preprocessors import PERCENTAGE_FIELDS, find_percentage_indices, metabolomic_transforms
+from scipy.special import logit
+from NeuralNetClasses import AutoencoderTransformer
+from Classifiers import get_classifier_and_cv
 
 from sklearn.metrics import make_scorer, recall_score, precision_score, f1_score, accuracy_score, balanced_accuracy_score, average_precision_score, roc_auc_score, precision_recall_curve
-
-from Classifiers import get_classifier_and_cv
 
 import warnings
 from sklearn.exceptions import ConvergenceWarning
@@ -28,7 +36,6 @@ warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 import argparse
 import yaml
-from sklearn.base import BaseEstimator, TransformerMixin
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -52,7 +59,7 @@ RESULTS_DIR = config['resultsdir']
 MODEL_DIR = config['modeldir']
 
 args = []
-args.insert(0, 'metab')
+args.insert(0, 'metab_only')
 
 datadir = DATA_DIR
   
@@ -77,14 +84,13 @@ data_all['opcat'] = data_all['opcat'].apply(lambda x: 'complex' if x.endswith('c
 columns_base = ['case', 'age_surgery', 'sex', 'score', 'admimeth_uni', 'opcat']
 columns_metab = [col for col in data_metab.columns if col not in ['eid']]
 
-
-
 data_all = data_all[data_all['eid'].isin(data_metab['eid'])]
 data_all.shape
 data_all = data_all.drop('eid', axis=1) 
 
 # complication loop
 
+# swap complication loop to age loop
 for cn in ['af', 'aki', 'ami', 'delirium', 'stroke', 'ssi']:
     
     age = 60 if cn in ['delirium', 'stroke'] else 18
@@ -106,7 +112,7 @@ for cn in ['af', 'aki', 'ami', 'delirium', 'stroke', 'ssi']:
     # set age
     data = data[data['age_surgery'] >= age]
 
-    data_now = data[columns_base + columns_metab]
+    data_now = data[['case'] + columns_metab]
 
     # remove individuals with >=80% missing values
     data_now = data_now.dropna(thresh=0.8*data_now.shape[1], axis=0)
@@ -119,20 +125,23 @@ for cn in ['af', 'aki', 'ami', 'delirium', 'stroke', 'ssi']:
     print('Columns dropped:', [col for col in predrop if col not in postdrop])
     print('Number of columns dropped:', len([col for col in predrop if col not in postdrop]))
 
-    X = data_now[columns_base].drop(['case'], axis=1)
+    X = data_now.drop(['case'], axis=1)
     y = data_now['case']
 
     print('Cases and controls:', y.value_counts())
+
     # preprocessing
 
     columns_to_exclude = ['count_all', 'count_ins', 'mi', 'chf', 'pvd', 'cevd', 'dementia', 'cpd', 'rheumd', 'pud', 'mld', 'diab', 'diabwc', 'hp', 'rend', 'canc', 'msld', 'metacanc', 'aids', 'score', 'spectrometer'] 
     columns_to_scale = [col for col in X.columns if X[col].dtype in ['int64', 'float64'] and col not in columns_to_exclude and col not in columns_metab]
-    columns_to_encode = [col for col in X.columns if X[col].dtype in ['object'] and col not in columns_to_exclude and col not in columns_metab]
+    columns_to_encode = [col for col in X.columns if X[col].dtype in ['object'] and col not in columns_to_exclude] + ['spectrometer']
     columns_to_zero = ['score']
-    
-    print('Columns to scale:', columns_to_scale)
-    print('Columns to encode:', columns_to_encode)
 
+    columns_for_ae = [col for col in columns_metab if col not in ['spectrometer'] and col in X.columns]
+    columns_to_scale = [col for col in columns_to_scale if col not in columns_for_ae]
+    # Recalculate percentage_indices based on filtered X
+    percentage_indices = find_percentage_indices(X[columns_for_ae], PERCENTAGE_FIELDS)
+    print(percentage_indices)
 
     num_pipeline = Pipeline([
         ('imputer', SimpleImputer(strategy='median')),
@@ -142,18 +151,36 @@ for cn in ['af', 'aki', 'ami', 'delirium', 'stroke', 'ssi']:
     cat_pipeline = Pipeline([
         ('imputer', SimpleImputer(strategy='constant')),
         ('encoder', OneHotEncoder(handle_unknown='error', drop='if_binary'))])
+    
     # columns to zero
     def binarize_cci(X):
         return (X >= 2).astype(int)
 
     zero_pipeline = Pipeline([
         ('imputer', SimpleImputer(strategy='constant', fill_value=0)),
-        ('binarizer', FunctionTransformer(binarize_cci, validate=False)),
+        ('binarizer', FunctionTransformer(binarize_cci, validate=False))
         ])
+    
+    dropout_trial = False
+    dim_trial = 16
+
+    # Create FunctionTransformer for metabolomic preprocessing
+    metab_transformer = FunctionTransformer(
+        lambda X: metabolomic_transforms(X, percentage_indices=percentage_indices),
+        validate=False
+    )
+
+    ae_pipeline = Pipeline([
+        ('metab_preprocess', metab_transformer),
+        ('scaler', StandardScaler()), # Calculates mean/std while ignoring NaNs
+        ('imputer', SimpleImputer(strategy='constant', fill_value=0)), # Impute with Mean (0)
+        ('clipper', FunctionTransformer(lambda x: np.clip(x, -10, 10))), # Safety Winsorization for AE
+        ('autoencoder', AutoencoderTransformer(encoding_dim=dim_trial, epochs=20, dropout=dropout_trial))
+    ])
+
     data_pipeline_ae = ColumnTransformer([
-        ('num', num_pipeline, columns_to_scale),
-        ('cat', cat_pipeline, columns_to_encode),
-        ('zero', zero_pipeline, columns_to_zero)],
+        ('ae', ae_pipeline, columns_for_ae),
+        ],
         n_jobs=1,
         remainder='drop'
         )
@@ -185,7 +212,7 @@ for cn in ['af', 'aki', 'ami', 'delirium', 'stroke', 'ssi']:
                     'precision_macro': 'precision_macro',
                     'f1_macro': 'f1_macro',
                     'average_precision': 'average_precision'}
-        
+
         nested = cross_validate(
             imba_pipeline, 
             X = X, 
@@ -193,20 +220,22 @@ for cn in ['af', 'aki', 'ami', 'delirium', 'stroke', 'ssi']:
             cv=cv_strategy, 
             return_train_score=True,
             scoring=scores,
-            return_estimator=True, 
+            return_estimator=False, 
             n_jobs=60, 
             verbose=3)
-        
+
         end_mod = datetime.now()
         print('Finished ', name, 'for ', cn, ' at ', end_mod, '. Time elapsed: ', end_mod - start_mod)
         print('Results for ', name, 'for ', cn, ' in dataset ', args[0])
-        
-        results_df = pd.DataFrame(nested).drop(['fit_time', 'score_time', 'estimator'], axis=1)
+
+        results_df = pd.DataFrame(nested).drop(['fit_time', 'score_time'], axis=1)
         results_df.loc['mean'] = results_df.mean()
         results_df.loc['std'] = results_df.std()
         results_df['model'] = name
         results_df['cn'] = cn
         results_df['dataset'] = args[0]
+        results_df['encoding_dim'] = dim_trial
+        results_df['dropout'] = dropout_trial
         results_df['date'] = datetime.now().strftime("%Y%m%d-%H%M%S")
         results_df['age'] = age
         results_df['n_cases'] = y.sum()
@@ -219,9 +248,9 @@ for cn in ['af', 'aki', 'ami', 'delirium', 'stroke', 'ssi']:
         full_output_dir = os.path.join(RESULTS_DIR, current_date_dir)
         os.makedirs(full_output_dir, exist_ok=True)
 
-        results_filename = f'results_{cn}_{name}_{args[0]}_{age}_baseline_en_newstrategy.csv'
-        results_file_path = os.path.join(full_output_dir, results_filename)
+        results_filename = f'results_{cn}_{name}_{args[0]}_ae_{dim_trial}_{dropout_trial}_{age}_fixed_newae_prepro.csv'
         
+        results_file_path = os.path.join(full_output_dir, results_filename)
         results_df.to_csv(results_file_path, index=True)
         
         end_comp = datetime.now()

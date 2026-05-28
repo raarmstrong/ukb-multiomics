@@ -14,8 +14,13 @@ from sklearn.impute import SimpleImputer
 from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedKFold
 from imblearn.ensemble import BalancedBaggingClassifier
 
-from sklearn.model_selection import cross_validate
-from sklearn.linear_model import LogisticRegression, LogisticRegressionCV 
+from sklearn.model_selection import GridSearchCV, cross_validate, RandomizedSearchCV
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier
+from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+
+from xgboost import XGBClassifier
 
 # for autoencoder
 from sklearn.base import BaseEstimator, TransformerMixin
@@ -25,7 +30,7 @@ from tensorflow.keras.optimizers import Adam
 
 from Preprocessors import PERCENTAGE_FIELDS, find_percentage_indices, metabolomic_transforms
 from scipy.special import logit
-from NeuralNetClasses import AutoencoderTransformer, AutoencoderTransformerProt
+from NeuralNetClasses import AutoencoderTransformerProt
 from Classifiers import get_classifier_and_cv
 
 from sklearn.metrics import make_scorer, recall_score, precision_score, f1_score, accuracy_score, balanced_accuracy_score, average_precision_score, roc_auc_score
@@ -62,7 +67,7 @@ RESULTS_DIR = config['resultsdir']
 MODEL_DIR = config['modeldir']
 
 args = []
-args.insert(0, 'multi_late')
+args.insert(0, 'multi_only')
 
 datadir = DATA_DIR
   
@@ -109,6 +114,7 @@ data_all = data_all.drop('eid', axis=1)
 
 # complication loop
 
+# swap complication loop to age loop
 for cn in ['af', 'aki', 'ami', 'delirium', 'stroke', 'ssi']:
 
     age = 60 if cn in ['delirium', 'stroke'] else 18
@@ -142,7 +148,7 @@ for cn in ['af', 'aki', 'ami', 'delirium', 'stroke', 'ssi']:
             columns_now = columns_inflammation + columns_inflammation_ii
         elif dataset == 'prot_all':
             columns_now = columns_prot
-        data_now = data[columns_base + columns_metab + columns_now]
+        data_now = data[['case'] + columns_metab + columns_now]
 
         # remove individuals with >=80% missing values
         data_now = data_now.dropna(thresh=0.8*data_now.shape[1], axis=0)
@@ -206,28 +212,34 @@ for cn in ['af', 'aki', 'ami', 'delirium', 'stroke', 'ssi']:
         print('Dropout:', dropout_trial)
         print('Dimensionality:', dim_trial)
 
-        ae_pipeline_metab = Pipeline([
+        # metab preprocessing pipeline
+        metab_preprocessor = Pipeline([
             ('metab_preprocess', metab_transformer),
             ('scaler', StandardScaler()), # Calculates mean/std while ignoring NaNs
-            ('imputer', SimpleImputer(strategy='constant', fill_value=0)), # Impute with Mean (0)
-            ('clipper', FunctionTransformer(lambda x: np.clip(x, -10, 10))), # Safety Winsorization for AE
-            ('autoencoder', AutoencoderTransformer(encoding_dim=dim_trial, epochs=20, dropout=dropout_trial))
+            ('imputer', SimpleImputer(strategy='constant', fill_value=0))
         ])
 
-        ae_pipeline_prot = Pipeline([
+        prot_preprocessor = Pipeline([
             ('imputer', SimpleImputer(strategy='mean')),
-            ('ranknorm', QuantileTransformer(output_distribution='normal', n_quantiles=samples, subsample=1e5, random_state=42)),
+            ('ranknorm', QuantileTransformer(output_distribution='normal', n_quantiles=samples, subsample=1e5, random_state=42))
+        ])
+        
+        # combine the multiomic preprocessors
+        multiomic_preprocessor = ColumnTransformer([
+            ('metab', metab_preprocessor, metab_columns_for_ae),
+            ('prot', prot_preprocessor, prot_columns_for_ae)
+        ])
+
+
+        ae_pipeline = Pipeline([
+            ('multiomic', multiomic_preprocessor),
             ('clipper', FunctionTransformer(lambda x: np.clip(x, -10, 10))), # Safety Winsorization for AE
             ('autoencoder', AutoencoderTransformerProt(encoding_dim=dim_trial, epochs=20, dropout=dropout_trial))
         ])
-
             # combine
         data_pipeline_ae = ColumnTransformer([
-            ('num', num_pipeline, columns_to_scale),
-            ('ae_metab', ae_pipeline_metab, metab_columns_for_ae),
-            ('ae_prot', ae_pipeline_prot, prot_columns_for_ae),
-            ('cat', cat_pipeline, columns_to_encode),
-            ('zero', zero_pipeline, columns_to_zero)],
+            ('ae', ae_pipeline, columns_for_ae),
+            ],
             n_jobs=1,
             remainder='drop'
             )

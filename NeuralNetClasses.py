@@ -32,9 +32,7 @@ class AutoencoderTransformer(BaseEstimator, TransformerMixin):
 
         else:
             encoded = Dense(64, activation='relu')(encoded)
-            #encoded = Dense(32, activation='relu')(encoded)
             bottleneck = Dense(self.encoding_dim, activation='linear')(encoded)
-            #encoded = Dense(32, activation='relu')(encoded)
             decoded = Dense(64, activation='relu')(bottleneck)
             decoded = Dense(128, activation='relu')(decoded)
             

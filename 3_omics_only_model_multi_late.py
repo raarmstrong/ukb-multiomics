@@ -14,8 +14,13 @@ from sklearn.impute import SimpleImputer
 from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedKFold
 from imblearn.ensemble import BalancedBaggingClassifier
 
-from sklearn.model_selection import cross_validate
-from sklearn.linear_model import LogisticRegression, LogisticRegressionCV 
+from sklearn.model_selection import GridSearchCV, cross_validate, RandomizedSearchCV
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier
+from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+
+from xgboost import XGBClassifier
 
 # for autoencoder
 from sklearn.base import BaseEstimator, TransformerMixin
@@ -62,7 +67,7 @@ RESULTS_DIR = config['resultsdir']
 MODEL_DIR = config['modeldir']
 
 args = []
-args.insert(0, 'multi_late')
+args.insert(0, 'multi_late_only')
 
 datadir = DATA_DIR
   
@@ -82,9 +87,11 @@ del(metab_info)
 data_multiomic = pd.merge(data_metab, data_prot, how = 'left', on = 'eid')
 data_all = pd.merge(data_cc, data_multiomic, how = 'left', on = 'eid')
 data_all.shape
+#data_all.to_csv(f'{datadir}/data_all.csv.gz', index=False)
 
 # define datasets - base demographics, clinical, bloods, pgs, metabolomic, gneotype
 
+#columns_base = ['case', 'age_surgery', 'score', 'tretspef_uni', 'admimeth_uni', 'opcat']
 # filter to admimeth elective or emergency
 data_all = data_all[data_all['admimeth_uni'].isin(['elective', 'emergency'])]
 
@@ -109,6 +116,8 @@ data_all = data_all.drop('eid', axis=1)
 
 # complication loop
 
+#compnames = ['af', 'aki']
+# swap complication loop to age loop
 for cn in ['af', 'aki', 'ami', 'delirium', 'stroke', 'ssi']:
 
     age = 60 if cn in ['delirium', 'stroke'] else 18
@@ -142,7 +151,7 @@ for cn in ['af', 'aki', 'ami', 'delirium', 'stroke', 'ssi']:
             columns_now = columns_inflammation + columns_inflammation_ii
         elif dataset == 'prot_all':
             columns_now = columns_prot
-        data_now = data[columns_base + columns_metab + columns_now]
+        data_now = data[['case'] + columns_metab + columns_now]
 
         # remove individuals with >=80% missing values
         data_now = data_now.dropna(thresh=0.8*data_now.shape[1], axis=0)
@@ -223,11 +232,12 @@ for cn in ['af', 'aki', 'ami', 'delirium', 'stroke', 'ssi']:
 
             # combine
         data_pipeline_ae = ColumnTransformer([
-            ('num', num_pipeline, columns_to_scale),
+            #('num', num_pipeline, columns_to_scale),
             ('ae_metab', ae_pipeline_metab, metab_columns_for_ae),
             ('ae_prot', ae_pipeline_prot, prot_columns_for_ae),
-            ('cat', cat_pipeline, columns_to_encode),
-            ('zero', zero_pipeline, columns_to_zero)],
+            #('cat', cat_pipeline, columns_to_encode),
+            #('zero', zero_pipeline, columns_to_zero)
+            ],
             n_jobs=1,
             remainder='drop'
             )
