@@ -128,6 +128,10 @@ If you use this code, please cite the accompanying preprint:
 
 > https://doi.org/10.64898/2026.03.10.26348039
 
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
 ## Statement on the Use of AI
 
 Generative AI (Gemini CLI v0.38.2, Model Auto: `gemini-3.1-pro` / `gemini-3-flash`) was used strictly to sanitise this code prior to public release:
