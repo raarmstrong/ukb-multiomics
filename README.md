@@ -17,7 +17,11 @@ All scripts are configurable via a YAML file (`config.yaml`) specifying data dir
 
 ## Required inputs
 
-The scripts require case-control data on postoperative complications with accompanying clinical covariates which are extracted from UK Biobank. Scripts detailing this process can be found in the following repositories: https://doi.org/10.1101/2025.09.01.25334224 and https://doi.org/10.64898/2025.12.11.25342055.
+The scripts require case-control data on postoperative complications with accompanying clinical covariates which are extracted from UK Biobank. 
+
+Scripts detailing this process can be found in the following repositories:
+- Delirium: https://github.com/raarmstrong/gwas-postop-delirium (https://doi.org/10.5281/zenodo.18196798)
+- Other outcomes: https://github.com/raarmstrong/gwas-postop-complications (https://doi.org/10.5281/zenodo.17901910).
 
 Metabolomic and protoemic data were QC'd using the metaboprep pipeline with default parameters: https://mrcieu.github.io/metaboprep/.
 
